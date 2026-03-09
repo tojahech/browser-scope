@@ -1,27 +1,101 @@
-#root {
-	max-width: 1280px;
-	margin: 0 auto;
-	padding: 2rem;
-	text-align: center;
+.container {
+  width: 800px;
+  height: 600px;
+  display: flex;
+  flex-direction: column;
 }
 
-.logo {
-	height: 6em;
-	padding: 1.5em;
-	will-change: filter;
-	transition: filter 300ms;
-}
-.logo:hover {
-	filter: drop-shadow(0 0 2em #54bc4ae0);
-}
-.logo.solid:hover {
-	filter: drop-shadow(0 0 2em #61dafbaa);
+.search-bar {
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.card {
-	padding: 2em;
+.search-bar input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.07);
+  color: inherit;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
 }
 
-.read-the-docs {
-	color: #888;
+.search-bar input:focus {
+  border-color: #646cff;
+}
+
+.results {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background-color 0.15s;
+}
+
+.result-item:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.result-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.result-url {
+  font-size: 11px;
+  color: #646cff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-description {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.empty {
+  padding: 16px 14px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  .search-bar {
+    border-bottom-color: rgba(0, 0, 0, 0.1);
+  }
+
+  .search-bar input {
+    border-color: rgba(0, 0, 0, 0.15);
+    background-color: rgba(0, 0, 0, 0.04);
+  }
+
+  .result-item {
+    border-bottom-color: rgba(0, 0, 0, 0.06);
+  }
+
+  .result-item:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+  }
+
+  .result-description {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  .empty {
+    color: rgba(0, 0, 0, 0.4);
+  }
 }
