@@ -48,9 +48,41 @@
   background-color: rgba(255, 255, 255, 0.06);
 }
 
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .result-title {
   font-size: 14px;
   font-weight: 500;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.result-badge.bookmark {
+  background-color: rgba(100, 108, 255, 0.2);
+  color: #8b92ff;
+}
+
+.result-badge.tab {
+  background-color: rgba(52, 199, 89, 0.2);
+  color: #4cd964;
+}
+
+.result-badge.history {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .result-url {
@@ -59,11 +91,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.result-description {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
 }
 
 .empty {
@@ -91,8 +118,9 @@
     background-color: rgba(0, 0, 0, 0.04);
   }
 
-  .result-description {
-    color: rgba(0, 0, 0, 0.5);
+  .result-badge.history {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.4);
   }
 
   .empty {
