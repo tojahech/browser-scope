@@ -1,2 +1,43 @@
 [tools]
+node = "26"
 pnpm = "latest"
+
+[tasks.install]
+description = "Install dependencies"
+run = "pnpm install"
+
+[tasks.dev]
+description = "Run the extension in Firefox with live reload"
+run = "pnpm dev"
+
+[tasks."dev:chrome"]
+description = "Run the extension in Chrome with live reload"
+run = "pnpm dev:chrome"
+
+[tasks.build]
+description = "Build the Firefox extension"
+run = "pnpm build"
+
+[tasks."build:chrome"]
+description = "Build the Chrome extension"
+run = "pnpm build:chrome"
+
+[tasks.test]
+description = "Run unit tests"
+run = "pnpm test"
+
+[tasks.compile]
+description = "Type-check without emitting"
+run = "pnpm compile"
+
+[tasks.lint]
+description = "Lint and check formatting"
+run = "pnpm lint"
+
+[tasks.fix]
+description = "Auto-fix lint and formatting issues"
+run = "pnpm fix"
+
+[tasks.check]
+description = "Type-check, lint, and test"
+depends = ["compile", "lint", "test"]

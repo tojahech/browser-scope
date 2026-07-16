@@ -1,119 +1,212 @@
-import { createSignal, For, Show } from "solid-js";
+import {
+	createEffect,
+	createMemo,
+	createSignal,
+	For,
+	on,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
+import { browser } from "wxt/browser";
+import {
+	activateResult,
+	openWebSearch,
+	switchToPreviousTab,
+} from "../../lib/actions";
+import { CONFIG } from "../../lib/config";
+import { segmentByIndices } from "../../lib/highlight";
+import {
+	KEYBINDINGS,
+	LAUNCH_SHORTCUT_DEFAULT,
+	matchesBinding,
+	matchesShortcut,
+	type ParsedShortcut,
+	parseCommandShortcut,
+} from "../../lib/keybindings";
+import {
+	dedupeCandidates,
+	type SearchResult,
+	searchCandidates,
+} from "../../lib/search";
+import { loadCandidates } from "../../lib/sources";
+import { applyBrowserTheme } from "../../lib/theme";
+import type { Candidate, SourceType } from "../../lib/types";
 import "./app.css";
 
-interface Result {
-  title: string;
-  url: string;
-  type: "bookmark" | "history" | "tab";
-  tabId?: number;
-  windowId?: number;
-}
+const TYPE_BADGE: Record<SourceType, string> = {
+	tab: "T",
+	bookmark: "B",
+	history: "H",
+};
 
-async function activateResult(result: Result) {
-  if (result.type === "tab" && result.tabId != null) {
-    await browser.tabs.update(result.tabId, { active: true });
-    await browser.windows.update(result.windowId!, { focused: true });
-  } else {
-    await browser.tabs.create({ url: result.url });
-  }
-  window.close();
-}
+const isMac = navigator.platform.toLowerCase().includes("mac");
 
-async function search(query: string): Promise<Result[]> {
-  const q = query.toLowerCase();
-
-  const [bookmarks, history, allTabs] = await Promise.all([
-    browser.bookmarks.search(query),
-    browser.history.search({ text: query, maxResults: 50 }),
-    browser.tabs.query({}),
-  ]);
-
-  const seenUrls = new Set<string>();
-  const results: Result[] = [];
-
-  const tabs = allTabs.filter(
-    (t) => t.url && (t.title?.toLowerCase().includes(q) || t.url.toLowerCase().includes(q))
-  );
-
-  for (const t of tabs) {
-    if (t.url) {
-      seenUrls.add(t.url);
-      results.push({ title: t.title || t.url, url: t.url, type: "tab", tabId: t.id, windowId: t.windowId });
-    }
-  }
-
-  for (const b of bookmarks) {
-    if (b.url && !seenUrls.has(b.url)) {
-      seenUrls.add(b.url);
-      results.push({ title: b.title || b.url, url: b.url, type: "bookmark" });
-    }
-  }
-
-  for (const h of history) {
-    if (h.url && !seenUrls.has(h.url)) {
-      results.push({ title: h.title || h.url, url: h.url, type: "history" });
-    }
-  }
-
-  return results;
+function Highlighted(props: { text: string; indices: number[] }) {
+	const segments = createMemo(() =>
+		segmentByIndices(props.text, props.indices),
+	);
+	return (
+		<For each={segments()}>
+			{(segment) =>
+				segment.highlighted ? <mark>{segment.text}</mark> : segment.text
+			}
+		</For>
+	);
 }
 
 function App() {
-  const [query, setQuery] = createSignal("");
-  const [results, setResults] = createSignal<Result[]>([]);
-  let debounce: ReturnType<typeof setTimeout>;
+	const openedAt = performance.now();
+	const [query, setQuery] = createSignal("");
+	const [candidates, setCandidates] = createSignal<Candidate[]>([]);
+	const [selectedRaw, setSelectedRaw] = createSignal(0);
 
-  const handleInput = (value: string) => {
-    setQuery(value);
-    clearTimeout(debounce);
-    if (!value.trim()) {
-      setResults([]);
-      return;
-    }
-    debounce = setTimeout(async () => {
-      setResults(await search(value.trim()));
-    }, 150);
-  };
+	let launchShortcut: ParsedShortcut | null = parseCommandShortcut(
+		LAUNCH_SHORTCUT_DEFAULT,
+		isMac,
+	);
+	let inputRef: HTMLInputElement | undefined;
+	let listRef: HTMLDivElement | undefined;
 
-  return (
-    <div class="container">
-      <div class="search-bar">
-        <input
-          type="text"
-          placeholder="Search bookmarks and history..."
-          value={query()}
-          onInput={(e) => handleInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && results().length > 0) activateResult(results()[0]);
-          }}
-          autofocus
-        />
-      </div>
-      <div class="results">
-        <Show when={query().trim().length > 0 && results().length === 0}>
-          <p class="empty">No results for "{query()}"</p>
-        </Show>
-        <For each={results()}>
-          {(result) => (
-            <a
-              class="result-item"
-              href={result.url}
-              onClick={async (e) => {
-                e.preventDefault();
-                await activateResult(result);
-              }}
-            >
-              <div class="result-header">
-                <span class="result-title">{result.title}</span>
-                <span class={`result-badge ${result.type}`}>{result.type}</span>
-              </div>
-              <span class="result-url">{result.url}</span>
-            </a>
-          )}
-        </For>
-      </div>
-    </div>
-  );
+	const results = createMemo(() => searchCandidates(query(), candidates()));
+	const selected = () =>
+		Math.min(selectedRaw(), Math.max(0, results().length - 1));
+
+	createEffect(on(query, () => setSelectedRaw(0)));
+
+	// Keep the selected row in view as the selection moves.
+	createEffect(() => {
+		const row = listRef?.children[selected()];
+		if (row instanceof HTMLElement) row.scrollIntoView({ block: "nearest" });
+	});
+
+	onMount(() => {
+		// Firefox assigns focus to the popup document itself shortly after
+		// opening, which can steal focus from the input if we only focus once
+		// on mount. Retry over the first few frames until focus sticks.
+		const focusInput = () => {
+			if (document.activeElement !== inputRef) inputRef?.focus();
+		};
+		focusInput();
+		requestAnimationFrame(focusInput);
+		const focusTimer = setInterval(focusInput, 50);
+		setTimeout(() => clearInterval(focusTimer), 500);
+		void applyBrowserTheme();
+		void loadCandidates().then((loaded) =>
+			setCandidates(dedupeCandidates(loaded)),
+		);
+		// Resolve the user's actual launch shortcut for double-tap detection.
+		void browser.commands
+			.getAll()
+			.then((commands) => {
+				const launch = commands.find((c) => c.name?.startsWith("_execute_"));
+				if (launch?.shortcut) {
+					launchShortcut =
+						parseCommandShortcut(launch.shortcut, isMac) ?? launchShortcut;
+				}
+			})
+			.catch(() => {});
+	});
+
+	function move(delta: number) {
+		const count = results().length;
+		if (count === 0) return;
+		setSelectedRaw(Math.max(0, Math.min(count - 1, selected() + delta)));
+	}
+
+	async function confirm(result: SearchResult | undefined) {
+		if (result === undefined) return;
+		await activateResult(result);
+		window.close();
+	}
+
+	function onKeyDown(e: KeyboardEvent) {
+		// Second press of the launch shortcut in quick succession: switch to
+		// the previously active tab (Alt-Tab style) and close.
+		if (
+			launchShortcut !== null &&
+			matchesShortcut(e, launchShortcut) &&
+			!e.repeat &&
+			performance.now() - openedAt <= CONFIG.DOUBLE_TAP_MS
+		) {
+			e.preventDefault();
+			void switchToPreviousTab().then(() => window.close());
+			return;
+		}
+		if (matchesBinding(e, KEYBINDINGS.moveDown)) {
+			e.preventDefault();
+			move(1);
+		} else if (matchesBinding(e, KEYBINDINGS.moveUp)) {
+			e.preventDefault();
+			move(-1);
+		} else if (matchesBinding(e, KEYBINDINGS.webSearch)) {
+			e.preventDefault();
+			const text = query().trim();
+			if (text !== "") void openWebSearch(text).then(() => window.close());
+		} else if (matchesBinding(e, KEYBINDINGS.confirm)) {
+			e.preventDefault();
+			void confirm(results()[selected()]);
+		} else if (matchesBinding(e, KEYBINDINGS.close)) {
+			e.preventDefault();
+			window.close();
+		}
+	}
+
+	window.addEventListener("keydown", onKeyDown);
+	onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+
+	return (
+		<div class="app" style={{ width: `${CONFIG.POPUP_WIDTH}px` }}>
+			<input
+				ref={inputRef}
+				class="query"
+				type="text"
+				autofocus
+				placeholder="Search tabs, bookmarks, history…"
+				spellcheck={false}
+				autocomplete="off"
+				value={query()}
+				onInput={(e) => setQuery(e.currentTarget.value)}
+			/>
+			<Show
+				when={results().length > 0}
+				fallback={
+					<div class="empty">
+						{query().trim() === "" ? "No open tabs" : "No matches"}
+					</div>
+				}
+			>
+				<div
+					ref={listRef}
+					class="results"
+					style={{
+						"--row-height": `${CONFIG.RESULT_ROW_HEIGHT}px`,
+						"max-height": `${CONFIG.RESULT_ROW_HEIGHT * CONFIG.MAX_VISIBLE_RESULTS}px`,
+					}}
+				>
+					<For each={results()}>
+						{(result, index) => (
+							<button
+								type="button"
+								classList={{ row: true, selected: index() === selected() }}
+								onClick={() => void confirm(result)}
+							>
+								<span class={`badge ${result.type}`}>
+									{TYPE_BADGE[result.type]}
+								</span>
+								<span class="title" title={result.url}>
+									<Highlighted
+										text={result.title}
+										indices={result.titleIndices}
+									/>
+								</span>
+							</button>
+						)}
+					</For>
+				</div>
+			</Show>
+		</div>
+	);
 }
 
 export default App;
