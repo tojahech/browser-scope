@@ -1,119 +1,190 @@
-import { createSignal, For, Show } from "solid-js";
+import {
+	createEffect,
+	createSignal,
+	For,
+	on,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
+import { CONFIG } from "../../shared/config";
+import {
+	isMoveDown,
+	isMoveUp,
+	POPUP_KEYBINDINGS,
+} from "../../shared/keybindings";
+import {
+	activateResult,
+	findResults,
+	searchWithDefaultEngine,
+} from "../../shared/results";
+import type { SearchResult } from "../../shared/search";
+import { applyBrowserTheme } from "../../shared/theme";
 import "./app.css";
 
-interface Result {
-  title: string;
-  url: string;
-  type: "bookmark" | "history" | "tab";
-  tabId?: number;
-  windowId?: number;
-}
+const SOURCE_LABEL = {
+	bookmark: "B",
+	history: "H",
+	tab: "T",
+} as const;
 
-async function activateResult(result: Result) {
-  if (result.type === "tab" && result.tabId != null) {
-    await browser.tabs.update(result.tabId, { active: true });
-    await browser.windows.update(result.windowId!, { focused: true });
-  } else {
-    await browser.tabs.create({ url: result.url });
-  }
-  window.close();
-}
-
-async function search(query: string): Promise<Result[]> {
-  const q = query.toLowerCase();
-
-  const [bookmarks, history, allTabs] = await Promise.all([
-    browser.bookmarks.search(query),
-    browser.history.search({ text: query, maxResults: 50 }),
-    browser.tabs.query({}),
-  ]);
-
-  const seenUrls = new Set<string>();
-  const results: Result[] = [];
-
-  const tabs = allTabs.filter(
-    (t) => t.url && (t.title?.toLowerCase().includes(q) || t.url.toLowerCase().includes(q))
-  );
-
-  for (const t of tabs) {
-    if (t.url) {
-      seenUrls.add(t.url);
-      results.push({ title: t.title || t.url, url: t.url, type: "tab", tabId: t.id, windowId: t.windowId });
-    }
-  }
-
-  for (const b of bookmarks) {
-    if (b.url && !seenUrls.has(b.url)) {
-      seenUrls.add(b.url);
-      results.push({ title: b.title || b.url, url: b.url, type: "bookmark" });
-    }
-  }
-
-  for (const h of history) {
-    if (h.url && !seenUrls.has(h.url)) {
-      results.push({ title: h.title || h.url, url: h.url, type: "history" });
-    }
-  }
-
-  return results;
+function HighlightedTitle(props: { positions: number[]; title: string }) {
+	const matchedPositions = new Set(props.positions);
+	return (
+		<For each={[...props.title]}>
+			{(character, index) =>
+				matchedPositions.has(index()) ? <mark>{character}</mark> : character
+			}
+		</For>
+	);
 }
 
 function App() {
-  const [query, setQuery] = createSignal("");
-  const [results, setResults] = createSignal<Result[]>([]);
-  let debounce: ReturnType<typeof setTimeout>;
+	const [query, setQuery] = createSignal("");
+	const [results, setResults] = createSignal<SearchResult[]>([]);
+	const [selectedIndex, setSelectedIndex] = createSignal(0);
+	const [isLoading, setIsLoading] = createSignal(true);
+	let requestId = 0;
+	const resultRows: HTMLButtonElement[] = [];
 
-  const handleInput = (value: string) => {
-    setQuery(value);
-    clearTimeout(debounce);
-    if (!value.trim()) {
-      setResults([]);
-      return;
-    }
-    debounce = setTimeout(async () => {
-      setResults(await search(value.trim()));
-    }, 150);
-  };
+	const refreshResults = async (value: string) => {
+		const currentRequest = ++requestId;
+		setIsLoading(true);
+		try {
+			const nextResults = await findResults(value);
+			if (currentRequest !== requestId) return;
+			setResults(nextResults);
+		} catch {
+			if (currentRequest !== requestId) return;
+			setResults([]);
+		} finally {
+			if (currentRequest === requestId) setIsLoading(false);
+		}
+	};
 
-  return (
-    <div class="container">
-      <div class="search-bar">
-        <input
-          type="text"
-          placeholder="Search bookmarks and history..."
-          value={query()}
-          onInput={(e) => handleInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && results().length > 0) activateResult(results()[0]);
-          }}
-          autofocus
-        />
-      </div>
-      <div class="results">
-        <Show when={query().trim().length > 0 && results().length === 0}>
-          <p class="empty">No results for "{query()}"</p>
-        </Show>
-        <For each={results()}>
-          {(result) => (
-            <a
-              class="result-item"
-              href={result.url}
-              onClick={async (e) => {
-                e.preventDefault();
-                await activateResult(result);
-              }}
-            >
-              <div class="result-header">
-                <span class="result-title">{result.title}</span>
-                <span class={`result-badge ${result.type}`}>{result.type}</span>
-              </div>
-              <span class="result-url">{result.url}</span>
-            </a>
-          )}
-        </For>
-      </div>
-    </div>
-  );
+	const moveSelection = (amount: number) => {
+		const count = results().length;
+		if (count === 0) return;
+		setSelectedIndex((index) => (index + amount + count) % count);
+	};
+
+	const confirmSelection = async () => {
+		const result = results()[selectedIndex()];
+		if (result) await activateResult(result);
+	};
+
+	const handleKeyDown = (event: KeyboardEvent) => {
+		if (event.key === POPUP_KEYBINDINGS.CLOSE) {
+			event.preventDefault();
+			window.close();
+			return;
+		}
+		if (isMoveDown(event)) {
+			event.preventDefault();
+			moveSelection(1);
+			return;
+		}
+		if (isMoveUp(event)) {
+			event.preventDefault();
+			moveSelection(-1);
+			return;
+		}
+		if (event.key !== POPUP_KEYBINDINGS.CONFIRM) return;
+		event.preventDefault();
+		if (event.ctrlKey) {
+			void searchWithDefaultEngine(query());
+			return;
+		}
+		void confirmSelection();
+	};
+
+	createEffect(on(results, () => setSelectedIndex(0)));
+	createEffect(() => {
+		const row = resultRows[selectedIndex()];
+		row?.scrollIntoView({ block: "nearest" });
+	});
+
+	onMount(() => {
+		void applyBrowserTheme();
+		void browser.runtime.sendMessage({ type: "popup-opened" });
+		void refreshResults("");
+		const closeListener = (message: { type?: string }) => {
+			if (message.type === "close-popup") window.close();
+		};
+		browser.runtime.onMessage.addListener(closeListener);
+		onCleanup(() => {
+			browser.runtime.onMessage.removeListener(closeListener);
+			void browser.runtime
+				.sendMessage({ type: "popup-closed" })
+				.catch(() => undefined);
+		});
+	});
+
+	return (
+		<main class="scope" onKeyDown={handleKeyDown}>
+			<div class="search-bar">
+				<input
+					aria-controls="scope-results"
+					aria-label="Search tabs, bookmarks, and history"
+					autofocus
+					placeholder="Search tabs, bookmarks, and history"
+					type="text"
+					value={query()}
+					onInput={(event) => {
+						const value = event.currentTarget.value;
+						setQuery(value);
+						void refreshResults(value);
+					}}
+				/>
+			</div>
+
+			<div
+				aria-busy={isLoading()}
+				aria-label="BrowserScope results"
+				class="results"
+				id="scope-results"
+				role="listbox"
+				style={{ "--visible-results": CONFIG.MAX_VISIBLE_RESULTS.toString() }}
+			>
+				<Show when={!isLoading() && results().length === 0}>
+					<p class="empty">
+						{query().trim() ? `No results for “${query()}”` : "No open tabs"}
+					</p>
+				</Show>
+				<For each={results()}>
+					{(result, index) => (
+						<button
+							aria-selected={selectedIndex() === index()}
+							class="result"
+							classList={{ selected: selectedIndex() === index() }}
+							ref={(element) => {
+								resultRows[index()] = element;
+							}}
+							role="option"
+							type="button"
+							onClick={() => void activateResult(result)}
+							onMouseMove={() => setSelectedIndex(index())}
+						>
+							<span
+								aria-label={result.source}
+								class={`source ${result.source}`}
+								role="img"
+								title={result.source}
+							>
+								{SOURCE_LABEL[result.source]}
+							</span>
+							<span class="title">
+								<HighlightedTitle
+									positions={result.matchPositions}
+									title={result.title}
+								/>
+							</span>
+						</button>
+					)}
+				</For>
+			</div>
+		</main>
+	);
 }
 
 export default App;

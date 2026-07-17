@@ -1,2 +1,20 @@
 [tools]
 pnpm = "latest"
+
+[tasks.compile]
+run = "pnpm compile"
+
+[tasks.lint]
+run = "pnpm lint"
+
+[tasks.test]
+run = "pnpm test"
+
+[tasks.check]
+depends = ["compile", "lint", "test"]
+
+[tasks.build]
+run = "pnpm build"
+
+[tasks.build-chrome]
+run = "pnpm build:chrome"

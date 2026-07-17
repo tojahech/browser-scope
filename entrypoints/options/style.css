@@ -1,0 +1,33 @@
+:root {
+	color-scheme: light dark;
+	font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+	line-height: 1.5;
+}
+
+body {
+	margin: 0;
+}
+
+main {
+	margin: 40px auto;
+	max-width: 660px;
+	padding: 0 24px;
+}
+
+h1,
+h2 {
+	line-height: 1.2;
+}
+
+section {
+	border-top: 1px solid color-mix(in srgb, currentcolor 20%, transparent);
+	margin-top: 24px;
+	padding-top: 16px;
+}
+
+kbd {
+	background: color-mix(in srgb, currentcolor 12%, transparent);
+	border-radius: 3px;
+	font-family: inherit;
+	padding: 1px 5px;
+}
