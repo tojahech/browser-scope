@@ -8,22 +8,14 @@ import {
 	Show,
 } from "solid-js";
 import { CONFIG } from "../lib/config";
+import { segmentByIndices } from "../lib/highlight";
 import { keyAction, moveSelection } from "../lib/keybindings";
-import { request, type Snapshot } from "../lib/messages";
-import { type Candidate, type Result, searchCandidates } from "../lib/search";
+import { request } from "../lib/messages";
+import { searchCandidates } from "../lib/search";
+import type { Candidate, Result } from "../lib/types";
 
 function Highlight(props: { text: string; matches: number[] }) {
-	const pieces = createMemo(() => {
-		const matched = new Set(props.matches);
-		const parts: { text: string; marked: boolean }[] = [];
-		for (let i = 0; i < props.text.length; i++) {
-			const marked = matched.has(i);
-			const last = parts[parts.length - 1];
-			if (last && last.marked === marked) last.text += props.text[i];
-			else parts.push({ text: props.text[i], marked });
-		}
-		return parts;
-	});
+	const pieces = createMemo(() => segmentByIndices(props.text, props.matches));
 	return (
 		<For each={pieces()}>
 			{(part) => (part.marked ? <mark>{part.text}</mark> : part.text)}
@@ -50,7 +42,7 @@ export default function Finder(props: { close: () => void }) {
 	onMount(async () => {
 		input.focus();
 		try {
-			const data = await request<Snapshot>({ type: "snapshot" });
+			const data = await request({ type: "snapshot" });
 			if (disposed) return;
 			setCandidates(data.candidates);
 			setTheme(data.theme);
@@ -86,7 +78,8 @@ export default function Finder(props: { close: () => void }) {
 		setError("");
 		try {
 			if (rawSearch) await request({ type: "search", query: query() });
-			else if (result) await request({ type: "activate", result });
+			else if (result)
+				await request({ type: "activate", target: result.target });
 			props.close();
 		} catch (reason) {
 			setError(String(reason));

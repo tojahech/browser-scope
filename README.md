@@ -33,14 +33,21 @@ Refresh existing web pages after installing or reloading the extension to attach
 
 ## Search and implementation
 
-The finder takes a fresh snapshot on each open: all tabs, the full bookmark tree, and up to the 10,000 most recent history entries. Fuzzy matching is case-insensitive across title and URL. Dynamic programming rewards contiguous matches and word boundaries, and supplies highlight positions. Scores are normalized to 0–1 and multiplied by source weights: tabs 1, bookmarks 0.85, history 0.65. Identical URLs appear once, preferring tabs, then bookmarks, then history; duplicate tabs select the most recently used instance. Up to 100 results are rendered.
+The finder takes a fresh snapshot on each open: all tabs, the full bookmark tree, and up to the 10,000 most recent history entries. Fuzzy matching is case-insensitive across title and URL. Dynamic programming rewards contiguous matches and word boundaries, and supplies highlight positions. Scores are normalized to 0–1 and multiplied by source weights: tabs 1, bookmarks 0.85, history 0.65. Identical URLs appear once, preferring tabs, then bookmarks, then history; duplicate tabs select the most recently used instance. All titles for a URL remain searchable: a match on a bookmark title can activate an existing tab, with highlights shown on the matching title. Up to 100 results are rendered.
 
 Search runs locally. No analytics, remote search service, or external assets are used. The tabs, bookmarks, and history permissions provide the search sources; storage preserves tab ordering across background worker restarts; search uses the configured browser engine; Firefox’s theme permission reads popup colors. A content script on eligible pages hosts the overlay in a closed shadow root with isolated styles and keyboard events.
 
 - `lib/config.ts`: shared limits, timings, default shortcut, and ranking weights.
 - `lib/keybindings.ts`: finder key mappings and selection behavior.
-- `lib/search.ts`: pure fuzzy matching, ranking, deduplication, and MRU ordering.
-- `entrypoints/background.ts`: browser APIs, MRU tracking, command handling, and fallback window.
+- `lib/types.ts`: discriminated source records, URL groups, and activation targets.
+- `lib/fuzzy.ts`, `lib/search.ts`, `lib/highlight.ts`: pure matching, URL grouping/ranking, and highlight segmentation.
+- `lib/sources.ts`: source snapshots with partial-failure warnings.
+- `lib/actions.ts`: tab activation and default-engine search; the caller owns UI closing.
+- `lib/mru.ts`: initialization, serialized updates, and persistence of tab recency.
+- `lib/launcher.ts`: launch sequencing, double-tap switching, and fallback-window state.
+- `lib/theme.ts`, `lib/firefox.ts`: theme conversion and Firefox API compatibility.
+- `lib/messages.ts`: request-to-response types, runtime request validation, and error replies.
+- `entrypoints/background.ts`: browser event registration and service wiring.
 - `components/Finder.tsx`: shared Solid finder interface.
 - `entrypoints/content/`: centered page overlay; `entrypoints/finder/`: fallback window.
 - `entrypoints/options/`: shortcut configuration and usage instructions.
@@ -52,11 +59,11 @@ Browser-owned pages (such as `about:` and `chrome:` pages), extension stores, an
 ## Manual smoke checks
 
 1. Open tabs in two windows, switch between them, and verify empty-query MRU order and double-tap switching.
-2. Bookmark a URL that is also open and in history; verify it appears once with the tab label.
+2. Bookmark a URL that is also open and in history; give the bookmark a distinct title. Search that title and verify the result appears once with the tab label and activates the existing tab.
 3. Enter a non-contiguous query, inspect highlights, navigate with both key sets, and activate with Enter and a mouse click.
 4. Use Ctrl+Enter and verify the browser’s configured default engine opens in a normal window.
 5. Close with Esc and verify the page’s previous input regains focus.
 6. Open from a restricted browser page and verify the fallback window, including double-tap switching.
 7. In Firefox, test a custom theme and change/reset the launch shortcut in options.
 
-Automated tests cover fuzzy alignment and ranking, deduplication, MRU order, key handling, source failures, cross-window activation, browser search APIs, and double-tap fallback behavior. Browser UI checks still require a live browser.
+Automated tests cover fuzzy alignment and ranking, alternate-title matching and activation, highlight segmentation, message contracts, MRU initialization and persistence, key handling, source failures, theme conversion, cross-window activation, browser search APIs, and double-tap fallback behavior. Browser UI checks still require a live browser.

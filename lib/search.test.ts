@@ -1,34 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { type Candidate, fuzzyMatch, searchCandidates } from "./search";
+import { fuzzyMatch } from "./fuzzy";
+import { searchCandidates } from "./search";
+import type { Candidate } from "./types";
 
 function candidate(
 	source: Candidate["source"],
 	title: string,
 	url = `https://${title}.test`,
-	lastAccessed = 0,
+	recency = 0,
 ): Candidate {
-	return { id: `${source}:${title}`, source, title, url, lastAccessed };
+	const page = { id: `${source}:${title}`, title, url };
+	if (source === "tab")
+		return {
+			...page,
+			source,
+			tabId: recency,
+			windowId: 1,
+			mruRank: 100 - recency,
+		};
+	if (source === "bookmark") return { ...page, source, dateAdded: recency };
+	return { ...page, source, lastVisited: recency };
 }
-describe("fuzzy matching", () => {
-	it("matches non-contiguous characters case-insensitively and returns highlight positions", () => {
-		expect(fuzzyMatch("BSc", "BrowserScope")?.indices).toEqual([0, 7, 8]);
-		expect(fuzzyMatch("zz", "BrowserScope")).toBeNull();
-	});
-	it("prefers contiguous matches and finds a later better alignment", () => {
-		expect(fuzzyMatch("abc", "a long b long c abc")?.indices).toEqual([
-			16, 17, 18,
-		]);
-		expect(fuzzyMatch("abc", "abc")?.score).toBeGreaterThan(
-			fuzzyMatch("abc", "a long b long c")?.score ?? 0,
-		);
-	});
-	it("handles empty, missing, and repeated characters", () => {
-		expect(fuzzyMatch("", "")).toEqual({ score: 1, indices: [] });
-		expect(fuzzyMatch("long", "a")).toBeNull();
-		expect(fuzzyMatch("aa", "a")).toBeNull();
-		expect(fuzzyMatch("aa", "banana")?.indices).toHaveLength(2);
-	});
-});
 describe("search ranking", () => {
 	it("shows only tabs in MRU order for empty queries", () => {
 		expect(
@@ -54,7 +46,8 @@ describe("search ranking", () => {
 		);
 		expect(results).toHaveLength(1);
 		expect(results[0].source).toBe("tab");
-		expect(results[0].title).toBe("page new");
+		expect(results[0].title).toBe("page");
+		expect(results[0].target).toEqual({ kind: "tab", tabId: 5 });
 	});
 	it("applies source discounts and keeps normalized scores", () => {
 		const results = searchCandidates(
@@ -100,5 +93,58 @@ describe("search ranking", () => {
 				"page",
 			),
 		).toHaveLength(100);
+	});
+});
+
+describe("URL variants", () => {
+	it("matches a bookmark title but activates the existing tab", () => {
+		const [result] = searchCandidates(
+			[
+				candidate("tab", "Dashboard", "https://example.test", 42),
+				candidate("bookmark", "Quarterly finances", "https://example.test"),
+			],
+			"finances",
+		);
+		expect(result).toMatchObject({
+			source: "tab",
+			title: "Quarterly finances",
+			target: { kind: "tab", tabId: 42 },
+			matchedCandidateId: "bookmark:Quarterly finances",
+		});
+		expect(result.titleMatches.map((i) => result.title[i]).join("")).toBe(
+			"finances",
+		);
+	});
+	it("matches an older duplicate tab title while activating the most recent instance", () => {
+		const [result] = searchCandidates(
+			[
+				candidate("tab", "Old title", "https://same", 1),
+				candidate("tab", "New title", "https://same", 5),
+			],
+			"old",
+		);
+		expect(result.title).toBe("Old title");
+		expect(result.target).toEqual({ kind: "tab", tabId: 5 });
+	});
+	it("keeps the preferred tab title for empty queries", () => {
+		const [result] = searchCandidates(
+			[
+				candidate("bookmark", "Alias", "https://same"),
+				candidate("tab", "Old", "https://same", 1),
+				candidate("tab", "Current", "https://same", 5),
+			],
+			"",
+		);
+		expect(result.title).toBe("Current");
+		expect(result.titleMatches).toEqual([]);
+	});
+	it("uses the preferred source weight even when history supplies the match", () => {
+		const bookmark = candidate("bookmark", "Dashboard", "https://same");
+		const history = candidate("history", "Finances", "https://same");
+		const [result] = searchCandidates([bookmark, history], "finances");
+		expect(result.target).toEqual({ kind: "url", url: "https://same" });
+		expect(result.score).toBeCloseTo(
+			(fuzzyMatch("finances", "Finances")?.score ?? 0) * 0.85,
+		);
 	});
 });

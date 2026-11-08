@@ -1,119 +1,92 @@
 import { CONFIG } from "./config";
-export type Source = keyof typeof CONFIG.sourceWeights;
-export interface Candidate {
-	id: string;
-	title: string;
-	url: string;
-	source: Source;
-	tabId?: number;
-	windowId?: number;
-	lastAccessed: number;
+import { fuzzyMatch } from "./fuzzy";
+import type { Candidate, Result, UrlGroup } from "./types";
+
+// Compare like units only: MRU ranks for tabs and timestamps within each
+// non-tab source. Source priority resolves equal scores across source types.
+function compareCandidates(a: Candidate, b: Candidate): number {
+	const source =
+		CONFIG.sourceWeights[b.source] - CONFIG.sourceWeights[a.source];
+	if (source) return source;
+	if (a.source === "tab" && b.source === "tab")
+		return a.mruRank - b.mruRank || a.id.localeCompare(b.id);
+	if (a.source === "bookmark" && b.source === "bookmark")
+		return b.dateAdded - a.dateAdded || a.id.localeCompare(b.id);
+	if (a.source === "history" && b.source === "history")
+		return b.lastVisited - a.lastVisited || a.id.localeCompare(b.id);
+	return a.id.localeCompare(b.id);
 }
-export interface Result extends Candidate {
-	score: number;
-	titleMatches: number[];
-	urlMatches: number[];
-}
-// Dynamic programming rewards adjacent characters and word boundaries, while
-// retaining the best alignment rather than committing to the first occurrence.
-export function fuzzyMatch(
-	query: string,
-	text: string,
-): { score: number; indices: number[] } | null {
-	const needle = query.toLowerCase();
-	const haystack = text.toLowerCase();
-	if (!needle.length) return { score: 1, indices: [] };
-	if (needle.length > haystack.length) return null;
-	let previous = new Float64Array(haystack.length).fill(-Infinity);
-	const paths: Int32Array[] = [];
-	const { base, boundary, consecutive, gap } = CONFIG.match;
-	for (let i = 0; i < needle.length; i++) {
-		const current = new Float64Array(haystack.length).fill(-Infinity);
-		const parents = new Int32Array(haystack.length).fill(-1);
-		let best = -Infinity;
-		let bestIndex = -1;
-		for (let j = 0; j < haystack.length; j++) {
-			if (j > 0 && previous[j - 1] + gap * (j - 1) > best) {
-				best = previous[j - 1] + gap * (j - 1);
-				bestIndex = j - 1;
-			}
-			if (needle[i] !== haystack[j]) continue;
-			const bonus =
-				base + (j === 0 || /[\s/._\-:?#=&]/.test(text[j - 1]) ? boundary : 0);
-			if (i === 0) current[j] = bonus - Math.min(j * gap, 0.8);
-			else {
-				current[j] = best - gap * (j - 1) + bonus;
-				parents[j] = bestIndex;
-				if (j > 0 && previous[j - 1] + consecutive + bonus >= current[j]) {
-					current[j] = previous[j - 1] + consecutive + bonus;
-					parents[j] = j - 1;
-				}
-			}
+export function groupCandidates(candidates: Candidate[]): UrlGroup[] {
+	const groups = new Map<string, UrlGroup>();
+	for (const candidate of candidates) {
+		const group = groups.get(candidate.url);
+		if (!group)
+			groups.set(candidate.url, {
+				url: candidate.url,
+				preferred: candidate,
+				variants: [candidate],
+			});
+		else {
+			group.variants.push(candidate);
+			if (compareCandidates(candidate, group.preferred) < 0)
+				group.preferred = candidate;
 		}
-		paths.push(parents);
-		previous = current;
 	}
-	let end = -1;
-	for (let j = 0; j < previous.length; j++)
-		if (end === -1 || previous[j] > previous[end]) end = j;
-	if (end < 0 || !Number.isFinite(previous[end])) return null;
-	const raw = previous[end];
-	const indices: number[] = [];
-	for (let i = needle.length - 1; i >= 0; i--) {
-		indices.unshift(end);
-		end = paths[i][end];
+	return [...groups.values()];
+}
+function matchGroup(group: UrlGroup, query: string): Result | null {
+	const preferred = group.preferred;
+	if (!query && preferred.source !== "tab") return null;
+	let matched = preferred;
+	let bestScore = -1;
+	let titleMatches: number[] = [];
+	const urlMatch = fuzzyMatch(query, group.url);
+	// Prefer the activation target's title when match quality is tied.
+	for (const variant of [
+		preferred,
+		...group.variants.filter((item) => item !== preferred),
+	]) {
+		const title = fuzzyMatch(query, variant.title);
+		if (!title && !urlMatch) continue;
+		const score = Math.max(title?.score ?? 0, urlMatch?.score ?? 0);
+		if (score > bestScore) {
+			bestScore = score;
+			matched = variant;
+			titleMatches = title?.indices ?? [];
+		}
 	}
-	const maximum =
-		needle.length * (base + boundary) + (needle.length - 1) * consecutive;
-	const score = Math.max(
-		0.01,
-		Math.min(
-			1,
-			(raw / maximum) * 0.9 + (needle.length / Math.max(text.length, 1)) * 0.1,
-		),
-	);
-	return { score, indices };
+	if (bestScore < 0) return null;
+	return {
+		id: preferred.id,
+		title: matched.title,
+		url: group.url,
+		source: preferred.source,
+		target:
+			preferred.source === "tab"
+				? { kind: "tab", tabId: preferred.tabId }
+				: { kind: "url", url: group.url },
+		matchedCandidateId: matched.id,
+		score: bestScore * CONFIG.sourceWeights[preferred.source],
+		titleMatches,
+		urlMatches: urlMatch?.indices ?? [],
+	};
 }
 export function searchCandidates(
 	candidates: Candidate[],
 	query: string,
 ): Result[] {
-	const unique = new Map<string, Candidate>();
-	for (const item of candidates) {
-		const prior = unique.get(item.url);
-		if (
-			!prior ||
-			CONFIG.sourceWeights[item.source] > CONFIG.sourceWeights[prior.source] ||
-			(item.source === prior.source && item.lastAccessed > prior.lastAccessed)
-		)
-			unique.set(item.url, item);
-	}
 	const needle = query.trim();
-	const results: Result[] = [];
-	for (const item of unique.values()) {
-		if (!needle) {
-			if (item.source === "tab")
-				results.push({ ...item, score: 1, titleMatches: [], urlMatches: [] });
-			continue;
-		}
-		const title = fuzzyMatch(needle, item.title);
-		const url = fuzzyMatch(needle, item.url);
-		if (!title && !url) continue;
-		results.push({
-			...item,
-			score:
-				Math.max(title?.score ?? 0, url?.score ?? 0) *
-				CONFIG.sourceWeights[item.source],
-			titleMatches: title?.indices ?? [],
-			urlMatches: url?.indices ?? [],
-		});
-	}
-	return results
+	return groupCandidates(candidates)
+		.map((group) => ({ group, result: matchGroup(group, needle) }))
+		.filter(
+			(item): item is { group: UrlGroup; result: Result } =>
+				item.result !== null,
+		)
 		.sort(
 			(a, b) =>
-				(needle ? b.score - a.score : 0) ||
-				b.lastAccessed - a.lastAccessed ||
-				a.id.localeCompare(b.id),
+				(needle ? b.result.score - a.result.score : 0) ||
+				compareCandidates(a.group.preferred, b.group.preferred),
 		)
-		.slice(0, CONFIG.resultLimit);
+		.slice(0, CONFIG.resultLimit)
+		.map(({ result }) => result);
 }

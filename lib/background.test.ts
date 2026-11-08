@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { Snapshot } from "./messages";
+import { searchCandidates } from "./search";
 
 const { api, listeners, state } = vi.hoisted(() => {
 	const listeners: Record<string, (...args: unknown[]) => unknown> = {};
@@ -141,21 +142,20 @@ it("preserves tabs and bookmarks when history access fails", async () => {
 });
 it("focuses both the selected tab and its window", async () => {
 	expect(
-		(await send({ type: "activate", result: { source: "tab", tabId: 2 } })).ok,
+		(await send({ type: "activate", target: { kind: "tab", tabId: 2 } })).ok,
 	).toBe(true);
 	expect(api.tabs.update).toHaveBeenCalledWith(2, { active: true });
 	expect(api.windows.update).toHaveBeenCalledWith(20, { focused: true });
 });
 it("returns actionable errors for closed tabs and rejects executable URLs", async () => {
 	expect(
-		(await send({ type: "activate", result: { source: "tab", tabId: 500 } }))
-			.ok,
+		(await send({ type: "activate", target: { kind: "tab", tabId: 500 } })).ok,
 	).toBe(false);
 	expect(
 		(
 			await send({
 				type: "activate",
-				result: { source: "bookmark", url: "javascript:alert(1)" },
+				target: { kind: "url", url: "javascript:alert(1)" },
 			})
 		).ok,
 	).toBe(false);
@@ -186,11 +186,27 @@ it("double-taps switch back even when the first tap opens a fallback window", as
 it("tracks recent activations and ignores messages from other extensions", async () => {
 	listeners.activated({ tabId: 2 });
 	const reply = await send({ type: "snapshot" });
-	const tabs = reply.value.candidates.filter(
-		(item: { source: string }) => item.source === "tab",
-	);
-	expect(tabs[1].lastAccessed).toBeGreaterThan(tabs[0].lastAccessed);
+	const tabs = reply.value.candidates.filter((item) => item.source === "tab");
+	expect(tabs[1].mruRank).toBeLessThan(tabs[0].mruRank);
 	expect(
 		await send({ type: "snapshot" }, { ...sender, id: "other" }),
 	).toBeUndefined();
+});
+
+it("activates the tab selected by an alternate-title search", async () => {
+	api.bookmarks.getTree.mockResolvedValueOnce([
+		{
+			children: [
+				{ id: "alias", title: "Quarterly finances", url: "https://one.test" },
+			],
+		},
+	]);
+	const { value } = await send({ type: "snapshot" });
+	const [result] = searchCandidates(value.candidates, "finances");
+	expect(result.title).toBe("Quarterly finances");
+	expect((await send({ type: "activate", target: result.target })).ok).toBe(
+		true,
+	);
+	expect(api.tabs.update).toHaveBeenCalledWith(1, { active: true });
+	expect(api.tabs.create).not.toHaveBeenCalled();
 });
