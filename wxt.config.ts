@@ -1,17 +1,25 @@
 import { defineConfig } from "wxt";
-
-// See https://wxt.dev/api/config.html
+import { CONFIG } from "./lib/config";
 export default defineConfig({
-  modules: ["@wxt-dev/module-solid"],
-  manifest: {
-    permissions: ["bookmarks", "history", "tabs"],
-    commands: {
-      _execute_browser_action: {
-        suggested_key: {
-          default: "Ctrl+P",
-          mac: "Command+Shift+I",
-        },
-      },
-    },
-  },
+	modules: ["@wxt-dev/module-solid"],
+	manifest: ({ browser }) => ({
+		name: CONFIG.name,
+		description:
+			"A keyboard-driven fuzzy finder for tabs, bookmarks, and history.",
+		permissions: [
+			"bookmarks",
+			"history",
+			"tabs",
+			"storage",
+			"search",
+			...(browser === "firefox" ? ["theme"] : []),
+		],
+		action: { default_title: "Open BrowserScope" },
+		commands: {
+			[CONFIG.command]: {
+				suggested_key: { default: CONFIG.defaultShortcut },
+				description: "Open BrowserScope (double-tap to switch to previous tab)",
+			},
+		},
+	}),
 });

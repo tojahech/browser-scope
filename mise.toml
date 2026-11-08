@@ -1,2 +1,15 @@
 [tools]
-pnpm = "latest"
+node = "22"
+pnpm = "10.20.0"
+
+[tasks.dev]
+run = "pnpm dev"
+
+[tasks.build]
+run = "pnpm build && pnpm build:chrome"
+
+[tasks.check]
+run = "pnpm lint && pnpm compile && pnpm test"
+
+[tasks.zip]
+run = "pnpm zip && pnpm zip:chrome"
