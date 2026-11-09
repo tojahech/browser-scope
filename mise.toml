@@ -1,2 +1,35 @@
 [tools]
+node = "26"
 pnpm = "latest"
+
+[tasks.install]
+description = "Install dependencies"
+run = "pnpm install"
+
+[tasks.dev]
+description = "Run the extension in Firefox with hot reload"
+run = "pnpm wxt -b firefox"
+
+[tasks."dev:chrome"]
+description = "Run the extension in Chrome with hot reload"
+run = "pnpm wxt -b chrome"
+
+[tasks.build]
+description = "Build the Firefox and Chrome extensions"
+run = ["pnpm wxt build -b firefox", "pnpm wxt build -b chrome"]
+
+[tasks.zip]
+description = "Package the Firefox and Chrome extensions"
+run = ["pnpm wxt zip -b firefox", "pnpm wxt zip -b chrome"]
+
+[tasks.test]
+description = "Run unit tests"
+run = "pnpm vitest run"
+
+[tasks.check]
+description = "Type check, lint and test"
+run = ["pnpm tsc --noEmit", "pnpm biome check", "pnpm vitest run"]
+
+[tasks.fix]
+description = "Format and apply safe lint fixes"
+run = "pnpm biome check --write"
