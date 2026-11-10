@@ -1,12 +1,17 @@
 import { render } from "solid-js/web";
-
+import { browser } from "wxt/browser";
+import { Finder } from "@/components/Finder";
+import type { UiMessage } from "@/lib/messages";
 import "./style.css";
-import App from "./app";
 
 const root = document.getElementById("root");
 
 if (root === null) {
-  throw new Error("Root element not found");
+	throw new Error("Root element not found");
 }
 
-render(() => <App />, root);
+browser.runtime.onMessage.addListener((message: UiMessage) => {
+	if (message.type === "closeUi") window.close();
+});
+
+render(() => <Finder variant="popup" onClose={() => window.close()} />, root);
