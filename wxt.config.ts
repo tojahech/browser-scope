@@ -21,6 +21,17 @@ export default defineConfig({
 			// Lets the UI match the Firefox theme.
 			...(browser === "firefox" ? ["theme"] : []),
 		],
+		// Firefox swaps toolbar icons to match the theme ("light" is the icon
+		// shown on dark themes). Chrome has no equivalent.
+		...(browser === "firefox" && {
+			browser_action: {
+				theme_icons: [16, 32].map((size) => ({
+					light: `icon-dark/${size}.png`,
+					dark: `icon/${size}.png`,
+					size,
+				})),
+			},
+		}),
 		commands: {
 			[LAUNCH_COMMAND]: {
 				suggested_key: {
